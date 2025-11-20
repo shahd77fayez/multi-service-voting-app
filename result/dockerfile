@@ -1,0 +1,45 @@
+# === STAGE 1: Builder (Install Dependencies) ===
+# Use a recent, minimal Node.js base image (e.g., node:20-alpine for smaller size)
+FROM bitnami/node:latest AS builder
+
+WORKDIR /usr/src/app
+
+# 1. Copy package files first to leverage Docker layer caching
+COPY result/package*.json ./
+
+# 2. Corrected: Use 'npm install' instead of 'npm ci' to resolve lockfile issues.
+# We keep '--omit=dev' to ensure only production dependencies are installed.
+RUN npm install --omit=dev
+
+# 3. Copy application source files in this stage as well (for the next stage to use)
+COPY result/server.js .
+COPY result/views/ ./views/
+
+
+# === STAGE 2: Final (Runtime Image) ===
+# Start from a clean, lightweight base image to reduce the attack surface.
+FROM bitnami/node:latest AS final
+
+# Set the work directory
+WORKDIR /usr/src/app
+
+# Set the default internal port for the application (server.js uses process.env.PORT || 4000)
+ENV PORT=4000
+
+# --- Security Best Practice: Leveraging Bitnami's Security Defaults ---
+# Bitnami images run as an unprivileged, non-root user (typically UID 1001) by default.
+# We do NOT need to manually add or switch users, as the base image handles this security measure.
+
+# 1. Copy dependencies from the 'builder' stage
+COPY --from=builder /usr/src/app/node_modules ./node_modules
+
+# 2. Copy application files from the 'builder' stage
+COPY --from=builder /usr/src/app/server.js .
+COPY --from=builder /usr/src/app/views ./views
+
+
+# Expose the internal container port
+EXPOSE 4000
+
+# 4. Command to run the application
+CMD [ "node", "server.js" ]

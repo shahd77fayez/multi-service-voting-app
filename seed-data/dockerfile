@@ -1,0 +1,34 @@
+# Dockerfile for the Seed Data Service
+# Use a slim Python image as it already contains Python and a functional package manager (apt)
+FROM python:3.11-slim-buster AS final
+
+# Set the working directory
+WORKDIR /usr/src/app
+
+# 1. Install necessary utility: Apache Bench (ab) for load generation
+# 'apache2-utils' is the package containing the 'ab' tool.
+# We clean up the apt cache immediately to keep the layer size small.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       apache2-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Copy the Python script and run it at build time
+# The script runs make-data.py to create the 'posta' and 'postb' files.
+COPY seed-data/make-data.py .
+RUN python make-data.py
+
+# 3. Copy the shell script that sends the votes
+COPY seed-data/generate-votes.sh .
+
+# --- Security Best Practice: Create and switch to a non-root user ---
+# Even for an ephemeral container, avoiding root is best practice.
+RUN addgroup --system appgroup && useradd --system -g appgroup appuser
+RUN chown -R appuser:appgroup /usr/src/app
+USER appuser
+
+# Make the shell script executable
+RUN chmod +x generate-votes.sh
+
+# The entrypoint is the shell script that runs the load test
+ENTRYPOINT ["./generate-votes.sh"]

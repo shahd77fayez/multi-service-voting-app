@@ -1,0 +1,118 @@
+version: '3.9'
+
+# Define the two required networks for isolation
+networks:
+  frontend-tier:
+    # Frontend services (Vote, Result)
+    driver: bridge
+  backend-tier:
+    # Backend services (Worker, Redis, DB)
+    driver: bridge
+    internal: true # Ensures services in this network are not externally reachable by default
+
+services:
+  # === Backend Tier Services ===
+
+  # 1. PostgreSQL Database Service
+  db:
+    image: postgres:13 # Use a stable, minimal image
+    hostname: db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      # Mount the PostgreSQL health check script
+      - ./healthchecks/postgres.sh:/usr/local/bin/docker-healthcheck
+    networks:
+      - backend-tier
+    healthcheck:
+      # Explicitly use 'sh' to execute the script
+      test: ["CMD", "/bin/bash", "/usr/local/bin/docker-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # 2. Redis Message Broker Service
+  redis:
+    image: redis:6 # Use a stable, minimal image
+    hostname: redis
+    restart: always
+    volumes:
+      # Mount the Redis health check script
+      - ./healthchecks/redis.sh:/usr/local/bin/docker-healthcheck:ro
+    networks:
+      - backend-tier
+    healthcheck:
+      # Explicitly use 'sh' to execute the script
+      test: ["CMD", "/bin/bash", "/usr/local/bin/docker-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # 3. .NET Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: worker/dockerfile
+    # Worker needs both Redis and DB to be ready
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    networks:
+      - backend-tier
+    restart: always
+
+  # === Frontend Tier Services ===
+  # Note: Vote and Result services are connected to BOTH tiers to be user-facing AND access the internal backend services (Redis/DB).
+
+  # 4. Python Vote Service
+  vote:
+    build:
+      context: .
+      dockerfile: vote/dockerfile
+    ports:
+      - "8080:80" # Expose to host on port 8080 (required)
+    # Needs Redis to be ready to queue votes
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - frontend-tier
+      - backend-tier
+    restart: always
+
+  # 5. Node.js Result Service
+  result:
+    build:
+      context: .
+      dockerfile: result/dockerfile
+    ports:
+      - "8081:4000" # Expose to host on port 8081 (internal port is 4000)
+    # Needs DB to be ready to query results
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - frontend-tier
+      - backend-tier
+    restart: always
+
+  # 6. Seed Data Utility Service (One-Time Execution)
+  seed:
+    build:
+      context: .
+      dockerfile: seed-data/dockerfile
+    # Wait for the Vote service to be running before attempting to send HTTP requests
+    depends_on:
+      vote:
+        condition: service_started
+    networks:
+      - frontend-tier # Needs to access the 'vote' service
+    profiles:
+      - seed # Use 'docker compose --profile seed up' to run this service

@@ -1,0 +1,48 @@
+# === STAGE 1: Build & Dependency Installation ===
+# Use a Python base image with system tools for installing dependencies
+FROM python:3.11-slim-buster AS builder
+
+# Set work directory
+WORKDIR /temp_build
+
+# Copy requirements
+COPY vote/requirements.txt .
+
+# Install dependencies (they are cached here)
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# === STAGE 2: Final Production Image ===
+# Start from a clean, fresh, minimal image for the final runtime
+FROM python:3.11-slim-buster AS final
+
+# Set environment variables for security and logging
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Set the final working directory
+WORKDIR /usr/src/app
+
+# 1. Copy installed dependencies from the 'builder' stage
+# This copies ONLY the installed packages, not the pip cache or temporary build files
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+
+COPY --from=builder /usr/local/bin/ /usr/local/bin
+
+# 2. Copy the application code and static assets
+COPY vote/app.py .
+COPY vote/templates/ templates/
+COPY vote/static/ static/
+
+# --- Security Best Practice: Switch to a non-root user ---
+# Note: For simplicity, we assume the python:slim image already contains the standard system user/group commands
+# For robust images, you would add the useradd/groupadd commands as in the previous example.
+RUN groupadd --system appuser && useradd --system -g appuser appuser
+RUN chown -R appuser:appuser /usr/src/app
+USER appuser
+
+# Expose the application port
+EXPOSE 80
+
+# Run the application using Gunicorn (production server)
+CMD ["gunicorn", "--bind", "0.0.0.0:80", "app:app"]
