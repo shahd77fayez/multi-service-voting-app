@@ -1,6 +1,6 @@
 # === STAGE 1: Builder (Install Dependencies) ===
 # Use a recent, minimal Node.js base image (e.g., node:20-alpine for smaller size)
-FROM bitnami/node:latest AS builder
+FROM  node:20-alpine AS builder
 
 WORKDIR /usr/src/app
 
@@ -18,7 +18,7 @@ COPY result/views/ ./views/
 
 # === STAGE 2: Final (Runtime Image) ===
 # Start from a clean, lightweight base image to reduce the attack surface.
-FROM bitnami/node:latest AS final
+FROM node:20-alpine AS final
 
 # Set the work directory
 WORKDIR /usr/src/app

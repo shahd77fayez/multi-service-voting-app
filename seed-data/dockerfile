@@ -1,6 +1,6 @@
 # Dockerfile for the Seed Data Service
 # Use a slim Python image as it already contains Python and a functional package manager (apt)
-FROM python:3.11-slim-buster AS final
+FROM python:3.11-slim AS final
 
 # Set the working directory
 WORKDIR /usr/src/app
